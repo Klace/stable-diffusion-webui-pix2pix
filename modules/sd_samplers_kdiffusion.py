@@ -58,18 +58,17 @@ class CFGDenoiser(torch.nn.Module):
         self.init_latent = None
         self.step = 0
 
-    def combine_denoised(self, x_out, conds_list, uncond, cond_scale, text_scale):
+    def combine_denoised(self, x_out, conds_list, uncond, cond_scale, image_scale):
         denoised_uncond = x_out[-uncond.shape[0]:]
         denoised = torch.clone(denoised_uncond)
 
         for i, conds in enumerate(conds_list):
             for cond_index, weight in conds:
-                #denoised[i] += (x_out[cond_index] - denoised_uncond[i]) * (weight * cond_scale)
-                denoised[i] += text_scale * (x_out[cond_index] - denoised_uncond[i]) + cond_scale * (denoised_uncond[i] - x_out[cond_index])
+                denoised[i] += cond_scale * (x_out[cond_index] - denoised_uncond[i]) + image_scale * (denoised_uncond[i] - x_out[cond_index])
     
         return denoised
 
-    def forward(self, x, sigma, uncond, cond, cond_scale, image_cond, text_scale):
+    def forward(self, x, sigma, uncond, cond, cond_scale, image_cond, image_scale):
         if state.interrupted or state.skipped:
             raise sd_samplers_common.InterruptedException
 
@@ -116,7 +115,7 @@ class CFGDenoiser(torch.nn.Module):
         elif opts.live_preview_content == "Negative prompt":
             sd_samplers_common.store_latent(x_out[-uncond.shape[0]:])
 
-        denoised = self.combine_denoised(x_out, conds_list, uncond, cond_scale, text_scale)
+        denoised = self.combine_denoised(x_out, conds_list, uncond, cond_scale, image_scale)
 
         if self.mask is not None:
             denoised = self.init_latent * self.mask + self.nmask * denoised
@@ -293,7 +292,7 @@ class KDiffusionSampler:
             'image_cond': image_conditioning, 
             'uncond': unconditional_conditioning, 
             'cond_scale': p.cfg_scale,
-            'text_scale': p.text_cfg_scale
+            'image_scale': p.image_cfg_scale
         }, disable=False, callback=self.callback_state, **extra_params_kwargs))
 
         return samples

@@ -912,7 +912,7 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
 class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
     sampler = None
 
-    def __init__(self, init_images: list = None, resize_mode: int = 0, denoising_strength: float = 0.75, mask: Any = None, mask_blur: int = 4, inpainting_fill: int = 0, inpaint_full_res: bool = True, inpaint_full_res_padding: int = 0, inpainting_mask_invert: int = 0, text_cfg_scale: float = 7.5, initial_noise_multiplier: float = None, **kwargs):
+    def __init__(self, init_images: list = None, resize_mode: int = 0, denoising_strength: float = 0.75, mask: Any = None, mask_blur: int = 4, inpainting_fill: int = 0, inpaint_full_res: bool = True, inpaint_full_res_padding: int = 0, inpainting_mask_invert: int = 0, image_cfg_scale: float = 7.5, initial_noise_multiplier: float = None, **kwargs):
         super().__init__(**kwargs)
 
         self.init_images = init_images
@@ -927,7 +927,7 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
         self.inpaint_full_res = inpaint_full_res
         self.inpaint_full_res_padding = inpaint_full_res_padding
         self.inpainting_mask_invert = inpainting_mask_invert
-        self.text_cfg_scale=text_cfg_scale
+        self.image_cfg_scale=image_cfg_scale
         self.initial_noise_multiplier = opts.initial_noise_multiplier if initial_noise_multiplier is None else initial_noise_multiplier
         self.mask = None
         self.nmask = None
