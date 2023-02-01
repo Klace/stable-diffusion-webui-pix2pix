@@ -11,6 +11,8 @@ import random
 import cv2
 from skimage import exposure
 from typing import Any, Dict, List, Optional
+from torch import autocast
+
 
 import modules.sd_hijack
 from modules import devices, prompt_parser, masking, sd_samplers, lowvram, generation_parameters_copypaste, script_callbacks, extra_networks, sd_vae_approx, scripts
@@ -186,7 +188,11 @@ class StableDiffusionProcessing:
         return conditioning
 
     def edit_image_conditioning(self, source_image):
-        conditioning_image = self.sd_model.get_first_stage_encoding(self.sd_model.encode_first_stage(source_image))
+        #source_image = 2 * torch.tensor(np.array(source_image)).float() / 255 - 1
+        #source_image = rearrange(source_image, "h w c -> 1 c h w").to(shared.device)
+        #source_image = rearrange(source_image, "h w c -> 1 c h w").to(shared.device)
+        #conditioning_image = self.sd_model.get_first_stage_encoding(self.sd_model.encode_first_stage(source_image))
+        conditioning_image = self.sd_model.encode_first_stage(source_image).mode()
 
         return conditioning_image
 
@@ -450,11 +456,14 @@ def create_infotext(p, all_prompts, all_seeds, all_subseeds, comments=None, iter
         "Size": f"{p.width}x{p.height}",
         "Model hash": getattr(p, 'sd_model_hash', None if not opts.add_model_hash_to_info or not shared.sd_model.sd_model_hash else shared.sd_model.sd_model_hash),
         "Model": (None if not opts.add_model_name_to_info or not shared.sd_model.sd_checkpoint_info.model_name else shared.sd_model.sd_checkpoint_info.model_name.replace(',', '').replace(':', '')),
+        "Batch size": (None if p.batch_size < 2 else p.batch_size),
+        "Batch pos": (None if p.batch_size < 2 else position_in_batch),
         "Variation seed": (None if p.subseed_strength == 0 else all_subseeds[index]),
         "Variation seed strength": (None if p.subseed_strength == 0 else p.subseed_strength),
         "Seed resize from": (None if p.seed_resize_from_w == 0 or p.seed_resize_from_h == 0 else f"{p.seed_resize_from_w}x{p.seed_resize_from_h}"),
         "Denoising strength": getattr(p, 'denoising_strength', None),
         "Conditional mask weight": getattr(p, "inpainting_mask_weight", shared.opts.inpainting_mask_weight) if p.is_using_inpainting_conditioning else None,
+        "Eta": (None),
         "Clip skip": None if clip_skip <= 1 else clip_skip,
         "ENSD": None if opts.eta_noise_seed_delta == 0 else opts.eta_noise_seed_delta,
     }
@@ -622,15 +631,17 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
             if p.n_iter > 1:
                 shared.state.job = f"Batch {n+1} out of {p.n_iter}"
 
+            print(f"c = {c} and uc = {uc}")
             with devices.without_autocast() if devices.unet_needs_upcast else devices.autocast():
                 samples_ddim = p.sample(conditioning=c, unconditional_conditioning=uc, seeds=seeds, subseeds=subseeds, subseed_strength=p.subseed_strength, prompts=prompts)
 
             x_samples_ddim = [decode_first_stage(p.sd_model, samples_ddim[i:i+1].to(dtype=devices.dtype_vae))[0].cpu() for i in range(samples_ddim.size(0))]
-            for x in x_samples_ddim:
-                devices.test_for_nans(x, "vae")
+            #for x in x_samples_ddim:
+            #    devices.test_for_nans(x, "vae")
 
             x_samples_ddim = torch.stack(x_samples_ddim).float()
             x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
+            #x_samples_ddim = 255.0 * rearrange(x_samples_ddim, "1 c h w -> h w c")
 
             del samples_ddim
 
@@ -645,7 +656,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
             for i, x_sample in enumerate(x_samples_ddim):
                 x_sample = 255. * np.moveaxis(x_sample.cpu().numpy(), 0, 2)
                 x_sample = x_sample.astype(np.uint8)
-
+                #x_sample = 255.0 * rearrange(x_sample, "1 c h w -> h w c")
                 if p.restore_faces:
                     if opts.save and not p.do_not_save_samples and opts.save_images_before_face_restoration:
                         images.save_image(Image.fromarray(x_sample), p.outpath_samples, "", seeds[i], prompts[i], opts.samples_format, info=infotext(n, i), p=p, suffix="-before-face-restoration")
@@ -868,8 +879,8 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
                 save_intermediate(image, i)
 
                 image = images.resize_image(0, image, target_width, target_height, upscaler_name=self.hr_upscaler)
-                image = np.array(image).astype(np.float32) / 255.0
-                image = np.moveaxis(image, 2, 0)
+                image = np.array(image).astype(np.float32) / 255.0 - 1
+                #image = np.moveaxis(image, 2, 0)
                 batch_images.append(image)
 
             decoded_samples = torch.from_numpy(np.array(batch_images))
@@ -901,7 +912,7 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
 class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
     sampler = None
 
-    def __init__(self, init_images: list = None, resize_mode: int = 0, denoising_strength: float = 0.75, mask: Any = None, mask_blur: int = 4, inpainting_fill: int = 0, inpaint_full_res: bool = True, inpaint_full_res_padding: int = 0, inpainting_mask_invert: int = 0, initial_noise_multiplier: float = None, **kwargs):
+    def __init__(self, init_images: list = None, resize_mode: int = 0, denoising_strength: float = 0.75, mask: Any = None, mask_blur: int = 4, inpainting_fill: int = 0, inpaint_full_res: bool = True, inpaint_full_res_padding: int = 0, inpainting_mask_invert: int = 0, image_cfg_scale: float = 7.5, initial_noise_multiplier: float = None, **kwargs):
         super().__init__(**kwargs)
 
         self.init_images = init_images
@@ -916,6 +927,7 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
         self.inpaint_full_res = inpaint_full_res
         self.inpaint_full_res_padding = inpaint_full_res_padding
         self.inpainting_mask_invert = inpainting_mask_invert
+        self.image_cfg_scale=image_cfg_scale
         self.initial_noise_multiplier = opts.initial_noise_multiplier if initial_noise_multiplier is None else initial_noise_multiplier
         self.mask = None
         self.nmask = None
@@ -983,9 +995,16 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
 
             if add_color_corrections:
                 self.color_corrections.append(setup_color_correction(image))
-
-            image = np.array(image).astype(np.float32) / 255.0
-            image = np.moveaxis(image, 2, 0)
+            width, height = image.size
+            factor = self.width / max(width, height)
+            factor = math.ceil(min(width, height) * factor / 64) * 64 / min(width, height)
+            width = int((width * factor) // 64) * 64
+            height = int((height * factor) // 64) * 64
+            image = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)   
+                  
+            #image = 2 * torch.tensor(np.array(image)).float() / 255 - 1
+            #image = np.array(image).astype(np.float32) / 255.0
+            #image = np.moveaxis(image, 2, 0)
 
             imgs.append(image)
 
@@ -1002,10 +1021,22 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
             batch_images = np.array(imgs)
         else:
             raise RuntimeError(f"bad number of images passed: {len(imgs)}; expecting {self.batch_size} or less")
-
-        image = torch.from_numpy(batch_images)
-        image = 2. * image - 1.
-        image = image.to(shared.device)
+        
+        #image = torch.from_numpy(batch_images)
+        #width, height = image.size
+        #factor = 512 / max(width, height)
+        ###factor = math.ceil(min(width, height) * factor / 64) * 64 / min(width, height)
+        #width = int((width * factor) // 64) * 64
+        #height = int((height * factor) // 64) * 64
+        #image = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)
+        ##image = 2. * image - 1.
+        #image = rearrange(image, "h w c -> 1 c h w")
+        #image = image.to(shared.device)
+        #image = torch.from_numpy(batch_images)
+        #image = 2. * image - 1.
+        image = 2 * torch.tensor(np.array(image)).float() / 255 - 1
+        image = rearrange(image, "h w c -> 1 c h w").to(shared.device)
+        #image = image.to(shared.device)
 
         self.init_latent = self.sd_model.get_first_stage_encoding(self.sd_model.encode_first_stage(image))
 
@@ -1032,6 +1063,7 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
         self.image_conditioning = self.img2img_image_conditioning(image, self.init_latent, image_mask)
 
     def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts):
+        
         x = create_random_tensors([opt_C, self.height // opt_f, self.width // opt_f], seeds=seeds, subseeds=subseeds, subseed_strength=self.subseed_strength, seed_resize_from_h=self.seed_resize_from_h, seed_resize_from_w=self.seed_resize_from_w, p=self)
 
         if self.initial_noise_multiplier != 1.0:
