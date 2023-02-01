@@ -64,7 +64,7 @@ class CFGDenoiser(torch.nn.Module):
 
         for i, conds in enumerate(conds_list):
             for cond_index, weight in conds:
-                denoised[i] += cond_scale * (x_out[cond_index] - denoised_uncond[i]) + image_scale * (denoised_uncond[i] - x_out[cond_index])
+                denoised[i] += weight * cond_scale * (x_out[cond_index] - denoised_uncond[i]) + image_scale * (denoised_uncond[i] - x_out[cond_index])
     
         return denoised
 
@@ -318,7 +318,8 @@ class KDiffusionSampler:
             'cond': conditioning, 
             'image_cond': image_conditioning, 
             'uncond': unconditional_conditioning, 
-            'cond_scale': p.cfg_scale
+            'cond_scale': p.cfg_scale,
+            'image_scale': 0.0
         }, disable=False, callback=self.callback_state, **extra_params_kwargs))
 
         return samples

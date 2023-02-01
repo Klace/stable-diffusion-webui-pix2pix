@@ -995,12 +995,12 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
 
             if add_color_corrections:
                 self.color_corrections.append(setup_color_correction(image))
-            width, height = image.size
-            factor = self.width / max(width, height)
-            factor = math.ceil(min(width, height) * factor / 64) * 64 / min(width, height)
-            width = int((width * factor) // 64) * 64
-            height = int((height * factor) // 64) * 64
-            image = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)   
+            #width, height = image.size
+            #factor = self.width / max(width, height)
+            #factor = math.ceil(min(width, height) * factor / 64) * 64 / min(width, height)
+            #width = int((width * factor) // 64) * 64
+            #height = int((height * factor) // 64) * 64
+            #image = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)   
                   
             #image = 2 * torch.tensor(np.array(image)).float() / 255 - 1
             #image = np.array(image).astype(np.float32) / 255.0
