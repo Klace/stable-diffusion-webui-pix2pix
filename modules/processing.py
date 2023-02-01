@@ -627,17 +627,15 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
             if p.n_iter > 1:
                 shared.state.job = f"Batch {n+1} out of {p.n_iter}"
 
-            print(f"c = {c} and uc = {uc}")
             with devices.without_autocast() if devices.unet_needs_upcast else devices.autocast():
                 samples_ddim = p.sample(conditioning=c, unconditional_conditioning=uc, seeds=seeds, subseeds=subseeds, subseed_strength=p.subseed_strength, prompts=prompts)
 
             x_samples_ddim = [decode_first_stage(p.sd_model, samples_ddim[i:i+1].to(dtype=devices.dtype_vae))[0].cpu() for i in range(samples_ddim.size(0))]
-            #for x in x_samples_ddim:
-            #    devices.test_for_nans(x, "vae")
+            for x in x_samples_ddim:
+                devices.test_for_nans(x, "vae")
 
             x_samples_ddim = torch.stack(x_samples_ddim).float()
             x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
-            #x_samples_ddim = 255.0 * rearrange(x_samples_ddim, "1 c h w -> h w c")
 
             del samples_ddim
 
@@ -652,7 +650,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
             for i, x_sample in enumerate(x_samples_ddim):
                 x_sample = 255. * np.moveaxis(x_sample.cpu().numpy(), 0, 2)
                 x_sample = x_sample.astype(np.uint8)
-                #x_sample = 255.0 * rearrange(x_sample, "1 c h w -> h w c")
+                
                 if p.restore_faces:
                     if opts.save and not p.do_not_save_samples and opts.save_images_before_face_restoration:
                         images.save_image(Image.fromarray(x_sample), p.outpath_samples, "", seeds[i], prompts[i], opts.samples_format, info=infotext(n, i), p=p, suffix="-before-face-restoration")
