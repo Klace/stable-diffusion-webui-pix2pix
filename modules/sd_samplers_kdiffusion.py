@@ -1,6 +1,7 @@
 from collections import deque
 import torch
 import inspect
+import einops
 import k_diffusion.sampling
 from modules import prompt_parser, devices, sd_samplers_common
 
@@ -76,7 +77,8 @@ class CFGDenoiser(torch.nn.Module):
 
         batch_size = len(conds_list)
         repeats = [len(conds_list[i]) for i in range(batch_size)]
-
+        #x_in = einops.repeat(x, "1 ... -> n ...", n=3)
+        #sigma_in = einops.repeat(sigma, "1 ... -> n ...", n=3)
         x_in = torch.cat([torch.stack([x[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [x])
         image_cond_in = torch.cat([torch.stack([image_cond[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [image_cond])
         sigma_in = torch.cat([torch.stack([sigma[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [sigma])
@@ -123,6 +125,21 @@ class CFGDenoiser(torch.nn.Module):
         self.step += 1
 
         return denoised
+
+class CFGDenoiserIp2p(torch.nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.inner_model = model
+
+    def forward(self, z, sigma, cond, uncond, text_cfg_scale, image_cfg_scale):
+        cfg_z = einops.repeat(z, "1 ... -> n ...", n=3)
+        cfg_sigma = einops.repeat(sigma, "1 ... -> n ...", n=3)
+        cfg_cond = {
+            "c_crossattn": [torch.cat([cond["c_crossattn"][0], uncond["c_crossattn"][0], uncond["c_crossattn"][0]])],
+            "c_concat": [torch.cat([cond["c_concat"][0], cond["c_concat"][0], uncond["c_concat"][0]])],
+        }
+        out_cond, out_img_cond, out_uncond = self.inner_model(cfg_z, cfg_sigma, cond=cfg_cond).chunk(3)
+        return out_uncond + text_cfg_scale * (out_cond - out_img_cond) + image_cfg_scale * (out_img_cond - out_uncond)
 
 
 class TorchHijack:
