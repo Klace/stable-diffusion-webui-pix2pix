@@ -64,8 +64,9 @@ class CFGDenoiser(torch.nn.Module):
 
         for i, conds in enumerate(conds_list):
             for cond_index, weight in conds:
-                denoised[i] += (x_out[cond_index] - denoised_uncond[i]) * (weight * cond_scale)
-
+                #denoised[i] += (x_out[cond_index] - denoised_uncond[i]) * (weight * cond_scale)
+                denoised[i] += 7.5 * (x_out[cond_index] - denoised_uncond[i]) + 1.5 * (denoised_uncond[i] - x_out[cond_index])
+    
         return denoised
 
     def forward(self, x, sigma, uncond, cond, cond_scale, image_cond):
@@ -77,11 +78,12 @@ class CFGDenoiser(torch.nn.Module):
 
         batch_size = len(conds_list)
         repeats = [len(conds_list[i]) for i in range(batch_size)]
-        #x_in = einops.repeat(x, "1 ... -> n ...", n=3)
-        #sigma_in = einops.repeat(sigma, "1 ... -> n ...", n=3)
-        x_in = torch.cat([torch.stack([x[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [x])
-        image_cond_in = torch.cat([torch.stack([image_cond[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [image_cond])
-        sigma_in = torch.cat([torch.stack([sigma[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [sigma])
+        x_in = einops.repeat(x, "1 ... -> n ...", n=3)
+        sigma_in = einops.repeat(sigma, "1 ... -> n ...", n=3)
+        #x_in = torch.cat([torch.stack([x[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [x])
+        #image_cond_in = einops.repeat(image_cond, "1 ... -> n ...", n=3)
+        image_cond_in = torch.cat([torch.stack([image_cond[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [image_cond] + [image_cond])
+        #sigma_in = torch.cat([torch.stack([sigma[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [sigma])
 
         denoiser_params = CFGDenoiserParams(x_in, image_cond_in, sigma_in, state.sampling_step, state.sampling_steps)
         cfg_denoiser_callback(denoiser_params)
@@ -90,7 +92,7 @@ class CFGDenoiser(torch.nn.Module):
         sigma_in = denoiser_params.sigma
 
         if tensor.shape[1] == uncond.shape[1]:
-            cond_in = torch.cat([tensor, uncond])
+            cond_in = torch.cat([tensor, uncond, uncond])
 
             if shared.batch_cond_uncond:
                 x_out = self.inner_model(x_in, sigma_in, cond={"c_crossattn": [cond_in], "c_concat": [image_cond_in]})
@@ -130,16 +132,27 @@ class CFGDenoiserIp2p(torch.nn.Module):
     def __init__(self, model):
         super().__init__()
         self.inner_model = model
+        self.mask = None
+        self.nmask = None
+        self.init_latent = None
+        self.step = 0
 
-    def forward(self, z, sigma, cond, uncond, text_cfg_scale, image_cfg_scale):
+    def forward(self, z, sigma, uncond, cond, cond_scale, image_cond):
+        if state.interrupted or state.skipped:
+            raise sd_samplers_common.InterruptedException
         cfg_z = einops.repeat(z, "1 ... -> n ...", n=3)
         cfg_sigma = einops.repeat(sigma, "1 ... -> n ...", n=3)
+        image_cond_in = einops.repeat(image_cond, "1 ... -> n ...", n=3)
+        
+        conds_list, tensor = prompt_parser.reconstruct_multicond_batch(cond, self.step)
+        uncond = prompt_parser.reconstruct_cond_batch(uncond, self.step)
+        cond_in = torch.cat([tensor, uncond])
         cfg_cond = {
-            "c_crossattn": [torch.cat([cond["c_crossattn"][0], uncond["c_crossattn"][0], uncond["c_crossattn"][0]])],
-            "c_concat": [torch.cat([cond["c_concat"][0], cond["c_concat"][0], uncond["c_concat"][0]])],
+            "c_crossattn": [cond_in],
+            "c_concat": [image_cond_in],
         }
         out_cond, out_img_cond, out_uncond = self.inner_model(cfg_z, cfg_sigma, cond=cfg_cond).chunk(3)
-        return out_uncond + text_cfg_scale * (out_cond - out_img_cond) + image_cfg_scale * (out_img_cond - out_uncond)
+        return out_uncond + cond_scale * (out_cond - out_img_cond) + 1.5 * (out_img_cond - out_uncond)
 
 
 class TorchHijack:

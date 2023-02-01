@@ -191,7 +191,8 @@ class StableDiffusionProcessing:
         #source_image = 2 * torch.tensor(np.array(source_image)).float() / 255 - 1
         #source_image = rearrange(source_image, "h w c -> 1 c h w").to(shared.device)
         #source_image = rearrange(source_image, "h w c -> 1 c h w").to(shared.device)
-        conditioning_image = self.sd_model.get_first_stage_encoding(self.sd_model.encode_first_stage(source_image))
+        #conditioning_image = self.sd_model.get_first_stage_encoding(self.sd_model.encode_first_stage(source_image))
+        conditioning_image = self.sd_model.encode_first_stage(source_image).mode()
 
         return conditioning_image
 
@@ -635,8 +636,8 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
                 samples_ddim = p.sample(conditioning=c, unconditional_conditioning=uc, seeds=seeds, subseeds=subseeds, subseed_strength=p.subseed_strength, prompts=prompts)
 
             x_samples_ddim = [decode_first_stage(p.sd_model, samples_ddim[i:i+1].to(dtype=devices.dtype_vae))[0].cpu() for i in range(samples_ddim.size(0))]
-            for x in x_samples_ddim:
-                devices.test_for_nans(x, "vae")
+            #for x in x_samples_ddim:
+            #    devices.test_for_nans(x, "vae")
 
             x_samples_ddim = torch.stack(x_samples_ddim).float()
             x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
@@ -999,7 +1000,8 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
             factor = math.ceil(min(width, height) * factor / 64) * 64 / min(width, height)
             width = int((width * factor) // 64) * 64
             height = int((height * factor) // 64) * 64
-            image = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)         
+            image = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)   
+                  
             #image = 2 * torch.tensor(np.array(image)).float() / 255 - 1
             #image = np.array(image).astype(np.float32) / 255.0
             #image = np.moveaxis(image, 2, 0)
