@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from PIL import Image
 import torchsde._brownian.brownian_interval
+from einops import rearrange
 from modules import devices, processing, images, sd_vae_approx
 
 from modules.shared import opts, state
@@ -40,6 +41,7 @@ def single_sample_to_image(sample, approximation=None):
     x_sample = torch.clamp((x_sample + 1.0) / 2.0, min=0.0, max=1.0)
     x_sample = 255. * np.moveaxis(x_sample.cpu().numpy(), 0, 2)
     x_sample = x_sample.astype(np.uint8)
+    
     return Image.fromarray(x_sample)
 
 
