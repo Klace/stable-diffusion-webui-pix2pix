@@ -188,10 +188,6 @@ class StableDiffusionProcessing:
         return conditioning
 
     def edit_image_conditioning(self, source_image):
-        #source_image = 2 * torch.tensor(np.array(source_image)).float() / 255 - 1
-        #source_image = rearrange(source_image, "h w c -> 1 c h w").to(shared.device)
-        #source_image = rearrange(source_image, "h w c -> 1 c h w").to(shared.device)
-        #conditioning_image = self.sd_model.get_first_stage_encoding(self.sd_model.encode_first_stage(source_image))
         conditioning_image = self.sd_model.encode_first_stage(source_image).mode()
 
         return conditioning_image
@@ -995,17 +991,9 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
 
             if add_color_corrections:
                 self.color_corrections.append(setup_color_correction(image))
-            #width, height = image.size
-            #factor = self.width / max(width, height)
-            #factor = math.ceil(min(width, height) * factor / 64) * 64 / min(width, height)
-            #width = int((width * factor) // 64) * 64
-            #height = int((height * factor) // 64) * 64
-            #image = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)   
-                  
-            #image = 2 * torch.tensor(np.array(image)).float() / 255 - 1
-            #image = np.array(image).astype(np.float32) / 255.0
-            #image = np.moveaxis(image, 2, 0)
 
+            image = 2 * torch.tensor(np.array(image)).float() / 255 - 1
+            image = rearrange(image, "h w c -> 1 c h w")
             imgs.append(image)
 
         if len(imgs) == 1:
@@ -1021,22 +1009,8 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
             batch_images = np.array(imgs)
         else:
             raise RuntimeError(f"bad number of images passed: {len(imgs)}; expecting {self.batch_size} or less")
-        
-        #image = torch.from_numpy(batch_images)
-        #width, height = image.size
-        #factor = 512 / max(width, height)
-        ###factor = math.ceil(min(width, height) * factor / 64) * 64 / min(width, height)
-        #width = int((width * factor) // 64) * 64
-        #height = int((height * factor) // 64) * 64
-        #image = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)
-        ##image = 2. * image - 1.
-        #image = rearrange(image, "h w c -> 1 c h w")
-        #image = image.to(shared.device)
-        #image = torch.from_numpy(batch_images)
-        #image = 2. * image - 1.
-        image = 2 * torch.tensor(np.array(image)).float() / 255 - 1
-        image = rearrange(image, "h w c -> 1 c h w").to(shared.device)
-        #image = image.to(shared.device)
+
+        image = image.to(shared.device)
 
         self.init_latent = self.sd_model.get_first_stage_encoding(self.sd_model.encode_first_stage(image))
 
