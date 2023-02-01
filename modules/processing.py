@@ -650,7 +650,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
             for i, x_sample in enumerate(x_samples_ddim):
                 x_sample = 255. * np.moveaxis(x_sample.cpu().numpy(), 0, 2)
                 x_sample = x_sample.astype(np.uint8)
-                
+
                 if p.restore_faces:
                     if opts.save and not p.do_not_save_samples and opts.save_images_before_face_restoration:
                         images.save_image(Image.fromarray(x_sample), p.outpath_samples, "", seeds[i], prompts[i], opts.samples_format, info=infotext(n, i), p=p, suffix="-before-face-restoration")
@@ -874,7 +874,6 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
 
                 image = images.resize_image(0, image, target_width, target_height, upscaler_name=self.hr_upscaler)
                 image = np.array(image).astype(np.float32) / 255.0 - 1
-                #image = np.moveaxis(image, 2, 0)
                 batch_images.append(image)
 
             decoded_samples = torch.from_numpy(np.array(batch_images))
