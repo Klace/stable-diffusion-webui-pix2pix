@@ -765,8 +765,8 @@ def create_ui():
 
                     elif category == "cfg":
                         with FormGroup():
-                            cfg_scale = gr.Slider(minimum=1.0, maximum=30.0, step=0.5, label='CFG Scale', value=7.5, elem_id="img2img_cfg_scale")
-                            image_cfg_scale = gr.Slider(minimum=1.0, maximum=30.0, step=0.5, label='Image CFG Scale', value=1.5, elem_id="img2img_cfg_scale")
+                            cfg_scale = gr.Slider(pminimum=1.0, maximum=30.0, step=0.05, label='CFG Scale', value=7.5, elem_id="img2img_cfg_scale")
+                            image_cfg_scale = gr.Slider(minimum=0.0, maximum=15.0, step=0.05, label='Image CFG Scale', value=0, elem_id="img2img_image_strength")
                             denoising_strength = gr.Slider(minimum=0.0, maximum=1.0, step=0.01, label='Denoising strength', value=0.75, elem_id="img2img_denoising_strength")
 
                     elif category == "seed":
