@@ -992,8 +992,9 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
             if add_color_corrections:
                 self.color_corrections.append(setup_color_correction(image))
 
-            image = 2 * torch.tensor(np.array(image)).float() / 255 - 1
-            image = rearrange(image, "h w c -> 1 c h w")
+            image = np.array(image).astype(np.float32) / 255.0
+            image = np.moveaxis(image, 2, 0)
+
             imgs.append(image)
 
         if len(imgs) == 1:
@@ -1010,6 +1011,8 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
         else:
             raise RuntimeError(f"bad number of images passed: {len(imgs)}; expecting {self.batch_size} or less")
 
+        image = torch.from_numpy(batch_images)
+        image = 2. * image - 1.
         image = image.to(shared.device)
 
         self.init_latent = self.sd_model.get_first_stage_encoding(self.sd_model.encode_first_stage(image))

@@ -77,8 +77,10 @@ class CFGDenoiser(torch.nn.Module):
 
         batch_size = len(conds_list)
         repeats = [len(conds_list[i]) for i in range(batch_size)]
-        x_in = einops.repeat(x, "1 ... -> n ...", n=3)
-        sigma_in = einops.repeat(sigma, "1 ... -> n ...", n=3)
+        #x_in = einops.repeat(x, "1 ... -> n ...", n=3)
+        x_in = torch.cat([torch.stack([x[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [x] + [x])
+        sigma_in = torch.cat([torch.stack([sigma[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [sigma] + [sigma])
+        #sigma_in = einops.repeat(sigma, "1 ... -> n ...", n=3)
         image_cond_in = torch.cat([torch.stack([image_cond[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [image_cond] + [image_cond])
 
         denoiser_params = CFGDenoiserParams(x_in, image_cond_in, sigma_in, state.sampling_step, state.sampling_steps)
