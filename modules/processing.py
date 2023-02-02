@@ -1049,7 +1049,7 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
         if self.mask is not None:
             samples = samples * self.nmask + self.init_latent * self.mask
 
-        del x  
+        del x 
         devices.torch_gc()
 
         return samples
