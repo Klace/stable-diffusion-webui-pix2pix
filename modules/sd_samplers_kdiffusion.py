@@ -1,7 +1,6 @@
 from collections import deque
 import torch
 import inspect
-import einops
 import k_diffusion.sampling
 from modules import prompt_parser, devices, sd_samplers_common
 
@@ -58,17 +57,17 @@ class CFGDenoiser(torch.nn.Module):
         self.init_latent = None
         self.step = 0
 
-    def combine_denoised(self, x_out, conds_list, uncond, cond_scale, image_scale):
+    def combine_denoised(self, x_out, conds_list, uncond, cond_scale):
         denoised_uncond = x_out[-uncond.shape[0]:]
         denoised = torch.clone(denoised_uncond)
 
         for i, conds in enumerate(conds_list):
             for cond_index, weight in conds:
-                denoised[i] += weight * cond_scale * (x_out[cond_index] - denoised_uncond[i]) + image_scale * (denoised_uncond[i] - x_out[cond_index])
-    
+                denoised[i] += (x_out[cond_index] - denoised_uncond[i]) * (weight * cond_scale)
+
         return denoised
 
-    def forward(self, x, sigma, uncond, cond, cond_scale, image_cond, image_scale):
+    def forward(self, x, sigma, uncond, cond, cond_scale, image_cond):
         if state.interrupted or state.skipped:
             raise sd_samplers_common.InterruptedException
 
@@ -77,10 +76,9 @@ class CFGDenoiser(torch.nn.Module):
 
         batch_size = len(conds_list)
         repeats = [len(conds_list[i]) for i in range(batch_size)]
-        #x_in = einops.repeat(x, "1 ... -> n ...", n=3)
+
         x_in = torch.cat([torch.stack([x[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [x] + [x])
         sigma_in = torch.cat([torch.stack([sigma[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [sigma] + [sigma])
-        #sigma_in = einops.repeat(sigma, "1 ... -> n ...", n=3)
         image_cond_in = torch.cat([torch.stack([image_cond[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [image_cond] + [image_cond])
 
         denoiser_params = CFGDenoiserParams(x_in, image_cond_in, sigma_in, state.sampling_step, state.sampling_steps)
@@ -117,7 +115,7 @@ class CFGDenoiser(torch.nn.Module):
         elif opts.live_preview_content == "Negative prompt":
             sd_samplers_common.store_latent(x_out[-uncond.shape[0]:])
 
-        denoised = self.combine_denoised(x_out, conds_list, uncond, cond_scale, image_scale)
+        denoised = self.combine_denoised(x_out, conds_list, uncond, cond_scale)
 
         if self.mask is not None:
             denoised = self.init_latent * self.mask + self.nmask * denoised
@@ -125,32 +123,6 @@ class CFGDenoiser(torch.nn.Module):
         self.step += 1
 
         return denoised
-
-class CFGDenoiserIp2p(torch.nn.Module):
-    def __init__(self, model):
-        super().__init__()
-        self.inner_model = model
-        self.mask = None
-        self.nmask = None
-        self.init_latent = None
-        self.step = 0
-
-    def forward(self, z, sigma, uncond, cond, cond_scale, image_cond):
-        if state.interrupted or state.skipped:
-            raise sd_samplers_common.InterruptedException
-        cfg_z = einops.repeat(z, "1 ... -> n ...", n=3)
-        cfg_sigma = einops.repeat(sigma, "1 ... -> n ...", n=3)
-        image_cond_in = einops.repeat(image_cond, "1 ... -> n ...", n=3)
-        
-        conds_list, tensor = prompt_parser.reconstruct_multicond_batch(cond, self.step)
-        uncond = prompt_parser.reconstruct_cond_batch(uncond, self.step)
-        cond_in = torch.cat([tensor, uncond])
-        cfg_cond = {
-            "c_crossattn": [cond_in],
-            "c_concat": [image_cond_in],
-        }
-        out_cond, out_img_cond, out_uncond = self.inner_model(cfg_z, cfg_sigma, cond=cfg_cond).chunk(3)
-        return out_uncond + cond_scale * (out_cond - out_img_cond) + 1.5 * (out_img_cond - out_uncond)
 
 
 class TorchHijack:
@@ -293,8 +265,7 @@ class KDiffusionSampler:
             'cond': conditioning, 
             'image_cond': image_conditioning, 
             'uncond': unconditional_conditioning, 
-            'cond_scale': p.cfg_scale,
-            'image_scale': p.image_cfg_scale
+            'cond_scale': p.cfg_scale
         }, disable=False, callback=self.callback_state, **extra_params_kwargs))
 
         return samples
@@ -320,8 +291,7 @@ class KDiffusionSampler:
             'cond': conditioning, 
             'image_cond': image_conditioning, 
             'uncond': unconditional_conditioning, 
-            'cond_scale': p.cfg_scale,
-            'image_scale': 0.0
+            'cond_scale': p.cfg_scale
         }, disable=False, callback=self.callback_state, **extra_params_kwargs))
 
         return samples
