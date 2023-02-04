@@ -143,7 +143,6 @@ def img2img(id_task: str, mode: int, prompt: str, negative_prompt: str, prompt_s
         inpainting_fill=inpainting_fill,
         resize_mode=resize_mode,
         denoising_strength=denoising_strength,
-        image_cfg_scale=image_cfg_scale,
         inpaint_full_res=inpaint_full_res,
         inpaint_full_res_padding=inpaint_full_res_padding,
         inpainting_mask_invert=inpainting_mask_invert,
