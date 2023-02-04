@@ -765,8 +765,9 @@ def create_ui():
 
                     elif category == "cfg":
                         with FormGroup():
-                            cfg_scale = gr.Slider(pminimum=1.0, maximum=30.0, step=0.05, label='CFG Scale', value=7.5, elem_id="img2img_cfg_scale")
-                            image_cfg_scale = gr.Slider(minimum=0.0, maximum=15.0, step=0.05, label='Image CFG Scale', value=0, elem_id="img2img_image_strength")
+                            with FormRow():
+                                cfg_scale = gr.Slider(minimum=1.0, maximum=30.0, step=0.5, label='CFG Scale', value=7.0, elem_id="img2img_cfg_scale")
+                                image_cfg_scale = gr.Slider(minimum=0, maximum=3.0, step=0.05, label='Image CFG Scale', value=1.5, elem_id="img2img_image_cfg_scale", visible=shared.sd_model and shared.sd_model.cond_stage_key == "edit")
                             denoising_strength = gr.Slider(minimum=0.0, maximum=1.0, step=0.01, label='Denoising strength', value=0.75, elem_id="img2img_denoising_strength")
 
                     elif category == "seed":
@@ -949,6 +950,7 @@ def create_ui():
                 (sampler_index, "Sampler"),
                 (restore_faces, "Face restoration"),
                 (cfg_scale, "CFG scale"),
+                (image_cfg_scale, "Image CFG scale"),
                 (seed, "Seed"),
                 (width, "Size-1"),
                 (height, "Size-2"),
@@ -1592,6 +1594,12 @@ def create_ui():
                 inputs=[component],
                 outputs=[component, text_settings],
             )
+
+        text_settings.change(
+            fn=lambda: gr.update(visible=shared.sd_model and shared.sd_model.cond_stage_key == "edit"),
+            inputs=[],
+            outputs=[image_cfg_scale],
+        )
 
         button_set_checkpoint = gr.Button('Change checkpoint', elem_id='change_checkpoint', visible=False)
         button_set_checkpoint.click(
