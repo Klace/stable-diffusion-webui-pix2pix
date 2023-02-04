@@ -2,6 +2,7 @@ import sys, os, shlex
 import contextlib
 import torch
 from modules import errors
+from modules.sd_hijack_utils import CondFunc
 from packaging import version
 
 
@@ -34,14 +35,18 @@ def get_cuda_device_string():
     return "cuda"
 
 
-def get_optimal_device():
+def get_optimal_device_name():
     if torch.cuda.is_available():
-        return torch.device(get_cuda_device_string())
+        return get_cuda_device_string()
 
     if has_mps():
-        return torch.device("mps")
+        return "mps"
 
-    return cpu
+    return "cpu"
+
+
+def get_optimal_device():
+    return torch.device(get_optimal_device_name())
 
 
 def get_device_for(task):
@@ -79,6 +84,16 @@ cpu = torch.device("cpu")
 device = device_interrogate = device_gfpgan = device_esrgan = device_codeformer = None
 dtype = torch.float16
 dtype_vae = torch.float16
+dtype_unet = torch.float16
+unet_needs_upcast = False
+
+
+def cond_cast_unet(input):
+    return input.to(dtype_unet) if unet_needs_upcast else input
+
+
+def cond_cast_float(input):
+    return input.float() if unet_needs_upcast else input
 
 
 def randn(seed, shape):
@@ -106,26 +121,70 @@ def autocast(disable=False):
     return torch.autocast("cuda")
 
 
-# MPS workaround for https://github.com/pytorch/pytorch/issues/79383
-orig_tensor_to = torch.Tensor.to
-def tensor_to_fix(self, *args, **kwargs):
-    if self.device.type != 'mps' and \
-       ((len(args) > 0 and isinstance(args[0], torch.device) and args[0].type == 'mps') or \
-       (isinstance(kwargs.get('device'), torch.device) and kwargs['device'].type == 'mps')):
-        self = self.contiguous()
-    return orig_tensor_to(self, *args, **kwargs)
+def without_autocast(disable=False):
+    return torch.autocast("cuda", enabled=False) if torch.is_autocast_enabled() and not disable else contextlib.nullcontext()
 
 
-# MPS workaround for https://github.com/pytorch/pytorch/issues/80800 
-orig_layer_norm = torch.nn.functional.layer_norm
-def layer_norm_fix(*args, **kwargs):
-    if len(args) > 0 and isinstance(args[0], torch.Tensor) and args[0].device.type == 'mps':
-        args = list(args)
-        args[0] = args[0].contiguous()
-    return orig_layer_norm(*args, **kwargs)
+class NansException(Exception):
+    pass
 
 
-# PyTorch 1.13 doesn't need these fixes but unfortunately is slower and has regressions that prevent training from working
-if has_mps() and version.parse(torch.__version__) < version.parse("1.13"):
-    torch.Tensor.to = tensor_to_fix
-    torch.nn.functional.layer_norm = layer_norm_fix
+def test_for_nans(x, where):
+    from modules import shared
+
+    if shared.cmd_opts.disable_nan_check:
+        return
+
+    if not torch.all(torch.isnan(x)).item():
+        return
+
+    if where == "unet":
+        message = "A tensor with all NaNs was produced in Unet."
+
+        if not shared.cmd_opts.no_half:
+            message += " This could be either because there's not enough precision to represent the picture, or because your video card does not support half type. Try setting the \"Upcast cross attention layer to float32\" option in Settings > Stable Diffusion or using the --no-half commandline argument to fix this."
+
+    elif where == "vae":
+        message = "A tensor with all NaNs was produced in VAE."
+
+        if not shared.cmd_opts.no_half and not shared.cmd_opts.no_half_vae:
+            message += " This could be because there's not enough precision to represent the picture. Try adding --no-half-vae commandline argument to fix this."
+    else:
+        message = "A tensor with all NaNs was produced."
+
+    message += " Use --disable-nan-check commandline argument to disable this check."
+
+    raise NansException(message)
+
+
+# MPS workaround for https://github.com/pytorch/pytorch/issues/89784
+def cumsum_fix(input, cumsum_func, *args, **kwargs):
+    if input.device.type == 'mps':
+        output_dtype = kwargs.get('dtype', input.dtype)
+        if output_dtype == torch.int64:
+            return cumsum_func(input.cpu(), *args, **kwargs).to(input.device)
+        elif cumsum_needs_bool_fix and output_dtype == torch.bool or cumsum_needs_int_fix and (output_dtype == torch.int8 or output_dtype == torch.int16):
+            return cumsum_func(input.to(torch.int32), *args, **kwargs).to(torch.int64)
+    return cumsum_func(input, *args, **kwargs)
+
+
+if has_mps():
+    if version.parse(torch.__version__) < version.parse("1.13"):
+        # PyTorch 1.13 doesn't need these fixes but unfortunately is slower and has regressions that prevent training from working
+
+        # MPS workaround for https://github.com/pytorch/pytorch/issues/79383
+        CondFunc('torch.Tensor.to', lambda orig_func, self, *args, **kwargs: orig_func(self.contiguous(), *args, **kwargs),
+                                                          lambda _, self, *args, **kwargs: self.device.type != 'mps' and (args and isinstance(args[0], torch.device) and args[0].type == 'mps' or isinstance(kwargs.get('device'), torch.device) and kwargs['device'].type == 'mps'))
+        # MPS workaround for https://github.com/pytorch/pytorch/issues/80800 
+        CondFunc('torch.nn.functional.layer_norm', lambda orig_func, *args, **kwargs: orig_func(*([args[0].contiguous()] + list(args[1:])), **kwargs),
+                                                                                        lambda _, *args, **kwargs: args and isinstance(args[0], torch.Tensor) and args[0].device.type == 'mps')
+        # MPS workaround for https://github.com/pytorch/pytorch/issues/90532
+        CondFunc('torch.Tensor.numpy', lambda orig_func, self, *args, **kwargs: orig_func(self.detach(), *args, **kwargs), lambda _, self, *args, **kwargs: self.requires_grad)
+    elif version.parse(torch.__version__) > version.parse("1.13.1"):
+        cumsum_needs_int_fix = not torch.Tensor([1,2]).to(torch.device("mps")).equal(torch.ShortTensor([1,1]).to(torch.device("mps")).cumsum(0))
+        cumsum_needs_bool_fix = not torch.BoolTensor([True,True]).to(device=torch.device("mps"), dtype=torch.int64).equal(torch.BoolTensor([True,False]).to(torch.device("mps")).cumsum(0))
+        cumsum_fix_func = lambda orig_func, input, *args, **kwargs: cumsum_fix(input, orig_func, *args, **kwargs)
+        CondFunc('torch.cumsum', cumsum_fix_func, None)
+        CondFunc('torch.Tensor.cumsum', cumsum_fix_func, None)
+        CondFunc('torch.narrow', lambda orig_func, *args, **kwargs: orig_func(*args, **kwargs).clone(), None)
+

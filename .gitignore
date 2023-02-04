@@ -32,3 +32,7 @@ notification.mp3
 /extensions
 /test/stdout.txt
 /test/stderr.txt
+/cache.json
+aes_scores.json
+exif_data.json
+aes_scores.json
