@@ -1,5 +1,4 @@
 from modules import sd_samplers_compvis, sd_samplers_kdiffusion, shared
-
 # imports for functions that previously were here and are used by other modules
 from modules.sd_samplers_common import samples_to_image_grid, sample_to_image
 

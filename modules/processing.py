@@ -5,14 +5,16 @@ import sys
 import warnings
 
 import torch
+from torch.nn import functional as F
 import numpy as np
 from PIL import Image, ImageFilter, ImageOps
 import random
 import cv2
 from skimage import exposure
 from typing import Any, Dict, List, Optional
-from torch import autocast
 
+import open_clip
+from torch import autocast
 
 import modules.sd_hijack
 from modules import devices, prompt_parser, masking, sd_samplers, lowvram, generation_parameters_copypaste, script_callbacks, extra_networks, sd_vae_approx, scripts
@@ -152,11 +154,11 @@ class StableDiffusionProcessing:
             self.seed_resize_from_w = 0
 
         self.scripts = None
-        self.script_args = script_args
-        self.all_prompts = None
-        self.all_negative_prompts = None
-        self.all_seeds = None
-        self.all_subseeds = None
+        self.script_args = None
+        self.all_prompts: Optional[List[str]] = None
+        self.all_negative_prompts: Optional[List[str]] = None
+        self.all_seeds: Optional[List[int]] = None
+        self.all_subseeds: Optional[List[int]] = None
         self.iteration = 0
 
     @property
@@ -249,7 +251,7 @@ class StableDiffusionProcessing:
     def init(self, all_prompts, all_seeds, all_subseeds):
         pass
 
-    def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts):
+    def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts, clip_target_embed):
         raise NotImplementedError()
 
     def close(self):
@@ -463,6 +465,8 @@ def create_infotext(p, all_prompts, all_seeds, all_subseeds, comments=None, iter
         "Conditional mask weight": getattr(p, "inpainting_mask_weight", shared.opts.inpainting_mask_weight) if p.is_using_inpainting_conditioning else None,
         "Eta": (None),
         "Clip skip": None if clip_skip <= 1 else clip_skip,
+        "Clip guidance model": None if not opts.clip_guidance else opts.clip_guidance_model,
+        "Clip guidance scale": None if not opts.clip_guidance or opts.clip_guidance_scale <= 0 else opts.clip_guidance_scale,
         "ENSD": None if opts.eta_noise_seed_delta == 0 else opts.eta_noise_seed_delta,
     }
 
@@ -471,8 +475,9 @@ def create_infotext(p, all_prompts, all_seeds, all_subseeds, comments=None, iter
     generation_params_text = ", ".join([k if k == v else f'{k}: {generation_parameters_copypaste.quote(v)}' for k, v in generation_params.items() if v is not None])
 
     negative_prompt_text = "\nNegative prompt: " + p.all_negative_prompts[index] if p.all_negative_prompts[index] else ""
+    clip_guidance_prompt_text = "\nClip guidance prompt: " + opts.clip_guidance_prompt if opts.clip_guidance and opts.clip_guidance_prompt.strip() else ""
 
-    return f"{all_prompts[index]}{negative_prompt_text}\n{generation_params_text}".strip()
+    return f"{all_prompts[index]}{negative_prompt_text}{clip_guidance_prompt_text}\n{generation_params_text}".strip()
 
 
 def process_images(p: StableDiffusionProcessing) -> Processed:
@@ -622,15 +627,29 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
             uc = get_conds_with_caching(prompt_parser.get_learned_conditioning, negative_prompts, p.steps, cached_uc)
             c = get_conds_with_caching(prompt_parser.get_multicond_learned_conditioning, prompts, p.steps, cached_c)
 
+            clip_target_embed = None
+            if opts.clip_guidance:
+                assert p.sampler_name in sd_samplers.samplers_k_diffusion_set, "CLIP guidance only supported for K-Diffusion samplers"
+                assert len(c.batch) == 1, "CLIP guidance only implemented for single-sample, single-condition scenario"
+                assert len(uc) == 1, "CLIP guidance only implemented for single-sample, single-condition scenario"
+                clip_prompt = opts.clip_guidance_prompt
+                if not clip_prompt.strip():
+                    clip_prompt = prompts[0]
+                clip_tokens = open_clip.tokenize(clip_prompt).to(shared.device)
+                clip_encoded = shared.clip_model.encode_text(clip_tokens).to(shared.device)
+                clip_target_embed = F.normalize(clip_encoded.float())
+                del clip_tokens
+                del clip_encoded
+
             if len(model_hijack.comments) > 0:
                 for comment in model_hijack.comments:
                     comments[comment] = 1
 
             if p.n_iter > 1:
                 shared.state.job = f"Batch {n+1} out of {p.n_iter}"
-
+                
             with devices.without_autocast() if devices.unet_needs_upcast else devices.autocast():
-                samples_ddim = p.sample(conditioning=c, unconditional_conditioning=uc, seeds=seeds, subseeds=subseeds, subseed_strength=p.subseed_strength, prompts=prompts)
+                samples_ddim = p.sample(conditioning=c, unconditional_conditioning=uc, seeds=seeds, subseeds=subseeds, subseed_strength=p.subseed_strength, prompts=prompts,clip_target_embed=clip_target_embed)
 
             x_samples_ddim = [decode_first_stage(p.sd_model, samples_ddim[i:i+1].to(dtype=devices.dtype_vae))[0].cpu() for i in range(samples_ddim.size(0))]
             for x in x_samples_ddim:
@@ -822,7 +841,7 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
             if self.hr_upscaler is not None:
                 self.extra_generation_params["Hires upscaler"] = self.hr_upscaler
 
-    def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts):
+    def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts, clip_target_embed):
         self.sampler = sd_samplers.create_sampler(self.sampler_name, self.sd_model)
 
         latent_scale_mode = shared.latent_upscale_modes.get(self.hr_upscaler, None) if self.hr_upscaler is not None else shared.latent_upscale_modes.get(shared.latent_upscale_default_mode, "nearest")
@@ -833,6 +852,8 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
         samples = self.sampler.sample(self, x, conditioning, unconditional_conditioning, image_conditioning=self.txt2img_image_conditioning(x))
 
         if not self.enable_hr:
+            x = create_random_tensors([opt_C, self.height // opt_f, self.width // opt_f], seeds=seeds, subseeds=subseeds, subseed_strength=self.subseed_strength, seed_resize_from_h=self.seed_resize_from_h, seed_resize_from_w=self.seed_resize_from_w, p=self)
+            samples = self.sampler.sample(self, x, conditioning, unconditional_conditioning, image_conditioning=self.txt2img_image_conditioning(x), clip_target_embed=clip_target_embed)
             return samples
 
         target_width = self.hr_upscale_to_x
@@ -899,7 +920,7 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
         x = None
         devices.torch_gc()
 
-        samples = self.sampler.sample_img2img(self, samples, noise, conditioning, unconditional_conditioning, steps=self.hr_second_pass_steps or self.steps, image_conditioning=image_conditioning)
+        samples = self.sampler.sample_img2img(self, samples, noise, conditioning, unconditional_conditioning, steps=self.hr_second_pass_steps or self.steps, image_conditioning=image_conditioning, clip_target_embed=clip_target_embed)
 
         return samples
 
@@ -1039,7 +1060,7 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
 
         self.image_conditioning = self.img2img_image_conditioning(image, self.init_latent, image_mask)
 
-    def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts):
+    def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts, clip_target_embed):
         
         x = create_random_tensors([opt_C, self.height // opt_f, self.width // opt_f], seeds=seeds, subseeds=subseeds, subseed_strength=self.subseed_strength, seed_resize_from_h=self.seed_resize_from_h, seed_resize_from_w=self.seed_resize_from_w, p=self)
 
@@ -1047,7 +1068,7 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
             self.extra_generation_params["Noise multiplier"] = self.initial_noise_multiplier
             x *= self.initial_noise_multiplier
 
-        samples = self.sampler.sample_img2img(self, self.init_latent, x, conditioning, unconditional_conditioning, image_conditioning=self.image_conditioning)
+        samples = self.sampler.sample_img2img(self, self.init_latent, x, conditioning, unconditional_conditioning, image_conditioning=self.image_conditioning, clip_target_embed=clip_target_embed)
 
         if self.mask is not None:
             samples = samples * self.nmask + self.init_latent * self.mask

@@ -85,6 +85,31 @@ def add_paste_fields(tabname, init_img, fields):
         modules.ui.img2img_paste_fields = fields
 
 
+def integrate_settings_paste_fields(component_dict):
+    from modules import ui
+
+    settings_map = {
+        'sd_hypernetwork': 'Hypernet',
+        'sd_hypernetwork_strength': 'Hypernet strength',
+        'CLIP_stop_at_last_layers': 'Clip skip',
+        'clip_guidance_scale': 'Clip guidance scale',
+        'clip_guidance_model': 'Clip guidance model',
+        'clip_guidance_prompt': 'Clip guidance prompt',
+        'inpainting_mask_weight': 'Conditional mask weight',
+        'sd_model_checkpoint': 'Model hash',
+        'eta_noise_seed_delta': 'ENSD',
+        'initial_noise_multiplier': 'Noise multiplier',
+    }
+    settings_paste_fields = [
+        (component_dict[k], lambda d, k=k, v=v: ui.apply_setting(k, d.get(v, None)))
+        for k, v in settings_map.items()
+    ]
+
+    for tabname, info in paste_fields.items():
+        if info["fields"] is not None:
+            info["fields"] += settings_paste_fields
+
+
 def create_buttons(tabs_list):
     buttons = {}
     for tab in tabs_list:

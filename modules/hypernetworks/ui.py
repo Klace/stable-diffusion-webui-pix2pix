@@ -13,6 +13,23 @@ keys = list(x for x in modules.hypernetworks.hypernetwork.HypernetworkModule.act
 def create_hypernetwork(name, enable_sizes, overwrite_old, layer_structure=None, activation_func=None, weight_init=None, add_layer_norm=False, use_dropout=False, dropout_structure=None):
     filename = modules.hypernetworks.hypernetwork.create_hypernetwork(name, enable_sizes, overwrite_old, layer_structure, activation_func, weight_init, add_layer_norm, use_dropout, dropout_structure)
 
+    if type(layer_structure) == str:
+        layer_structure = [float(x.strip()) for x in layer_structure.split(",")]
+
+    hypernet = modules.hypernetworks.hypernetwork.Hypernetwork(
+        name=name,
+        enable_sizes=[int(x) for x in enable_sizes],
+        layer_structure=layer_structure,
+        activation_func=activation_func,
+        weight_init=weight_init,
+        add_layer_norm=add_layer_norm,
+        use_dropout=use_dropout,
+    )
+    hypernet.save(fn)
+
+    shared.reload_hypernetworks()
+    shared.reload_clip_model()
+
     return gr.Dropdown.update(choices=sorted([x for x in shared.hypernetworks.keys()])), f"Created: {filename}", ""
 
 

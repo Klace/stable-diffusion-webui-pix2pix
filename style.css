@@ -545,20 +545,17 @@ input[type="range"]{
     width: fit-content;
 }
 
-#quicksettings > div, #quicksettings > fieldset{
-    max-width: 24em;
-    min-width: 24em;
-    padding: 0;
-    border: none;
-    box-shadow: none;
-    background: none;
-    margin-right: 10px;
-}
-
 #quicksettings > div > div > div > label > span {
     position: relative;
     margin-right: 9em;
     margin-bottom: -1em;
+}
+
+
+#refresh_sd_model_checkpoint, #refresh_sd_vae, #refresh_sd_hypernetwork, #refresh_train_hypernetwork_name, #refresh_train_embedding_name, #refresh_localization, #refresh_clip_guidance_model{
+    max-width: 2.5em;
+    min-width: 2.5em;
+    height: 2.4em;
 }
 
 canvas[key="mask"] {
@@ -627,6 +624,61 @@ canvas[key="mask"] {
     margin: 0;
 }
 
+    /* automatically generated with few manual modifications */
+    .performance .time {
+        margin-right: unset;
+        margin-left: 0;
+    }
+    .justify-center.overflow-x-scroll {
+        justify-content: right;
+    }
+    .justify-center.overflow-x-scroll button:first-of-type {
+        margin-left: unset;
+        margin-right: auto;
+    }
+    .justify-center.overflow-x-scroll button:last-of-type {
+        margin-right: unset;
+        margin-left: auto;
+    }
+    #settings fieldset span.text-gray-500, #settings .gr-block.gr-box span.text-gray-500, #settings label.block span{
+        margin-right: unset;
+        margin-left: 8em;
+    }
+    #txt2img_progressbar, #img2img_progressbar, #ti_progressbar{
+        right: unset;
+        left: 0;
+    }
+    .progressDiv .progress{
+        padding: 0 0 0 8px;
+        text-align: left;
+    }
+    #lightboxModal{
+        left: unset;
+        right: 0;
+    }
+    .modalPrev, .modalNext{
+        border-radius: 3px 0 0 3px;
+    }
+    .modalNext {
+        right: unset;
+        left: 0;
+        border-radius: 0 3px 3px 0;
+    }
+    #imageARPreview{
+        left:unset;
+        right:0px;
+    }
+    #txt2img_skip, #img2img_skip{
+        right: unset;
+        left: 0px;
+    }
+    #context-menu{
+        box-shadow:-1px 1px 2px #CE6400;
+    }
+    .gr-box > div > div > input.gr-text-input{
+        right: unset;
+        left: 0.5em;
+    }
 #available_extensions .date_added{
     opacity: 0.85;
     font-size: 90%;
